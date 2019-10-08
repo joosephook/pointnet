@@ -12,14 +12,13 @@ sys.path.append(BASE_DIR)
 sys.path.append(os.path.join(BASE_DIR, 'models'))
 sys.path.append(os.path.join(BASE_DIR, 'utils'))
 import provider
-import pc_util
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--gpu', type=int, default=0, help='GPU to use [default: GPU 0]')
 parser.add_argument('--model', default='pointnet_cls', help='Model name: pointnet_cls or pointnet_cls_basic [default: pointnet_cls]')
-parser.add_argument('--batch_size', type=int, default=4, help='Batch Size during training [default: 1]')
-parser.add_argument('--num_point', type=int, default=1024, help='Point Number [256/512/1024/2048] [default: 1024]')
+parser.add_argument('--batch_size', type=int, default=1, help='Batch Size during training [default: 1]')
+parser.add_argument('--num_point', type=int, default=2048, help='Point Number [256/512/1024/2048] [default: 1024]')
 parser.add_argument('--model_path', default='log/model.ckpt', help='model checkpoint file path [default: log/model.ckpt]')
 parser.add_argument('--dump_dir', default='dump', help='dump folder path [dump]')
 parser.add_argument('--visu', action='store_true', help='Whether to dump image for error case [default: False]')
@@ -36,17 +35,20 @@ if not os.path.exists(DUMP_DIR): os.mkdir(DUMP_DIR)
 LOG_FOUT = open(os.path.join(DUMP_DIR, 'log_evaluate.txt'), 'w')
 LOG_FOUT.write(str(FLAGS)+'\n')
 
-NUM_CLASSES = 40
+#NUM_CLASSES = 40
+#MAX_NUM_POINT = 2048
+# NUM_CLASSES = 40
+NUM_CLASSES = 9
 SHAPE_NAMES = [line.rstrip() for line in \
-    open(os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/shape_names.txt'))] 
+    open(os.path.join(BASE_DIR, 'data/modelnet40_jamie/test/shape_names.txt'))]
 
 HOSTNAME = socket.gethostname()
 
 # ModelNet40 official train/test split
-TRAIN_FILES = provider.getDataFiles( \
-    os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/train_files.txt'))
-TEST_FILES = provider.getDataFiles(\
-    os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/test_files.txt'))
+# TRAIN_FILES = provider.getDataFiles(os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/train_files.txt'))
+# TEST_FILES = provider.getDataFiles(os.path.join(BASE_DIR, 'data/modelnet40_ply_hdf5_2048/test_files.txt'))
+TRAIN_FILES = provider.getDataFiles(os.path.join(BASE_DIR, 'data/modelnet40_jamie/train/files.txt'))
+TEST_FILES = provider.getDataFiles(os.path.join(BASE_DIR, 'data/modelnet40_jamie/test/files.txt'))
 
 def log_string(out_str):
     LOG_FOUT.write(out_str+'\n')
@@ -116,6 +118,7 @@ def eval_one_epoch(sess, ops, num_votes=1, topk=1):
             batch_loss_sum = 0 # sum of losses for the batch
             batch_pred_sum = np.zeros((cur_batch_size, NUM_CLASSES)) # score for classes
             batch_pred_classes = np.zeros((cur_batch_size, NUM_CLASSES)) # 0/1 for classes
+
             for vote_idx in range(num_votes):
                 rotated_data = provider.rotate_point_cloud_by_angle(current_data[start_idx:end_idx, :, :],
                                                   vote_idx/float(num_votes) * np.pi * 2)
@@ -124,6 +127,13 @@ def eval_one_epoch(sess, ops, num_votes=1, topk=1):
                              ops['is_training_pl']: is_training}
                 loss_val, pred_val = sess.run([ops['loss'], ops['pred']],
                                           feed_dict=feed_dict)
+                for pred, label in zip(pred_val, current_label[start_idx:end_idx]):
+                    #probabilities = np.exp(pred)/np.sum(np.exp(pred))
+                    #fout.write(','.join(map(str, probabilities)))
+                    fout.write(','.join(map(str, pred)))
+                    fout.write(',')
+                    fout.write(str(label))
+                    fout.write('\n')
                 batch_pred_sum += pred_val
                 batch_pred_val = np.argmax(pred_val, 1)
                 for el_idx in range(cur_batch_size):
@@ -144,15 +154,7 @@ def eval_one_epoch(sess, ops, num_votes=1, topk=1):
                 l = current_label[i]
                 total_seen_class[l] += 1
                 total_correct_class[l] += (pred_val[i-start_idx] == l)
-                fout.write('%d, %d\n' % (pred_val[i-start_idx], l))
-                
-                if pred_val[i-start_idx] != l and FLAGS.visu: # ERROR CASE, DUMP!
-                    img_filename = '%d_label_%s_pred_%s.jpg' % (error_cnt, SHAPE_NAMES[l],
-                                                           SHAPE_NAMES[pred_val[i-start_idx]])
-                    img_filename = os.path.join(DUMP_DIR, img_filename)
-                    output_img = pc_util.point_cloud_three_views(np.squeeze(current_data[i, :, :]))
-                    scipy.misc.imsave(img_filename, output_img)
-                    error_cnt += 1
+                #fout.write('%d, %d\n' % (pred_val[i-start_idx], l))
                 
     log_string('eval mean loss: %f' % (loss_sum / float(total_seen)))
     log_string('eval accuracy: %f' % (total_correct / float(total_seen)))
